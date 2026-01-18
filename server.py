@@ -579,9 +579,6 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
 </head>
 <body>
     <div class="app">
-        <div class="header">
-            <div class="title" id="mainTitle">Files ↔ Phone</div>
-        </div>
 
         <!-- Upload Section -->
         <div class="section" id="uploadSection">
@@ -631,7 +628,7 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
 
         // Update UI based on device
         function updateUIForDevice() {
-            const mainTitle = document.getElementById('mainTitle');
+
             const uploadSectionTitle = document.getElementById('uploadSectionTitle');
             const downloadSectionTitle = document.getElementById('downloadSectionTitle');
             const hintText = document.getElementById('hintText');
@@ -639,13 +636,11 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
 
             if (isDesktop) {
                 // Desktop: Hide downloads section
-                mainTitle.textContent = 'Files → Phone';
                 uploadSectionTitle.textContent = 'Send to Phone';
                 downloadSection.style.display = 'none';
                 hintText.innerHTML = 'Pick files here → Download them on your phone<br>Or open this URL on your phone to send files to your PC';
             } else {
                 // Mobile: Show both sections
-                mainTitle.textContent = 'Files ↔ PC';
                 uploadSectionTitle.textContent = 'Send to PC';
                 downloadSectionTitle.textContent = 'Download from PC';
                 downloadSection.style.display = 'block';
