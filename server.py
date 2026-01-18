@@ -35,6 +35,10 @@ def get_file_icon(filename):
     """Get appropriate icon for file type."""
     ext = filename.lower().split('.')[-1] if '.' in filename else ''
     
+    # Incomplete/temporary download files
+    if ext in ['crdownload', 'part', 'tmp', 'download', 'partial']:
+        return '⏳'  # In progress
+    
     if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico']:
         return FILE_ICONS['image']
     elif ext in ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']:
