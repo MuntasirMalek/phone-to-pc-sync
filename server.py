@@ -19,6 +19,9 @@ PORT = 8766
 SYSTEM = platform.system()
 DOWNLOADS_FOLDER = str(Path.home() / "Downloads")
 
+# In-memory text sync storage
+synced_text = ""
+
 # File type icons for the UI
 FILE_ICONS = {
     'image': '🖼️',
@@ -103,7 +106,31 @@ def get_files_list():
 
 class FileTransferHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
-        """Handle file upload from phone."""
+        """Handle file upload and text sync."""
+        global synced_text
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        
+        # Handle text sync
+        if path == '/text':
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length > 0:
+                    text_data = self.rfile.read(content_length).decode('utf-8')
+                    synced_text = text_data
+                    print(f"📝 Text synced: {len(text_data)} characters")
+                
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({'success': True, 'length': len(synced_text)}).encode())
+            except Exception as e:
+                print(f"❌ Text sync error: {e}")
+                self.send_error(500, str(e))
+            return
+        
+        # Handle file upload
         try:
             content_type = self.headers.get('Content-Type', '')
             content_length = int(self.headers.get('Content-Length', 0))
@@ -165,11 +192,21 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
             self.serve_html()
         elif path == '/files':
             self.serve_files_list()
+        elif path == '/text':
+            self.serve_synced_text()
         elif path.startswith('/download/'):
             filename = urllib.parse.unquote(path[10:])
             self.serve_file_download(filename)
         else:
             self.send_error(404)
+    
+    def serve_synced_text(self):
+        """Serve the synced text."""
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps({'text': synced_text}).encode())
     
     def serve_files_list(self):
         """Serve JSON list of files."""
@@ -239,14 +276,14 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
     <meta name="theme-color" content="#fafafa">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>📁</title>
+    <title>🔄 Sync</title>
 
-    <!-- App Icon -->
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='0' y='0' width='100' height='100' fill='%23fafafa'/%3E%3Crect x='20' y='30' width='60' height='50' rx='4' fill='%23222'/%3E%3Crect x='20' y='20' width='30' height='15' rx='3' fill='%23222'/%3E%3C/svg%3E">
-    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='0' y='0' width='100' height='100' fill='%23ffffff'/%3E%3Crect x='20' y='30' width='60' height='50' rx='4' fill='%23222222'/%3E%3Crect x='20' y='20' width='30' height='15' rx='3' fill='%23222222'/%3E%3C/svg%3E">
+    <!-- App Icon - Folder with Sync Badge -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23fafafa'/%3E%3Cpath d='M15 25h25l5-8h35v8h0v45H15V25z' fill='%23222'/%3E%3Cpath d='M15 32h65v38H15z' fill='%23333'/%3E%3Ccircle cx='72' cy='62' r='18' fill='%232563eb'/%3E%3Cpath d='M72 52 L78 58 L72 58 L72 52 M66 66 L72 72 L72 66 L66 66' fill='white'/%3E%3Cpath d='M72 52 C79 52 84 57 84 64' stroke='white' stroke-width='3' fill='none'/%3E%3Cpath d='M72 72 C65 72 60 67 60 60' stroke='white' stroke-width='3' fill='none'/%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23fff'/%3E%3Cpath d='M15 25h25l5-8h35v8h0v45H15V25z' fill='%23222'/%3E%3Cpath d='M15 32h65v38H15z' fill='%23333'/%3E%3Ccircle cx='72' cy='62' r='18' fill='%232563eb'/%3E%3Cpath d='M72 52 L78 58 L72 58 L72 52 M66 66 L72 72 L72 66 L66 66' fill='white'/%3E%3Cpath d='M72 52 C79 52 84 57 84 64' stroke='white' stroke-width='3' fill='none'/%3E%3Cpath d='M72 72 C65 72 60 67 60 60' stroke='white' stroke-width='3' fill='none'/%3E%3C/svg%3E">
 
     <!-- Web Manifest -->
-    <link rel="manifest" href="data:application/manifest+json,%7B%22short_name%22%3A%22PCSync%22%2C%22name%22%3A%22PC%20Sync%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%253E%253Crect%20width%3D'100'%20height%3D'100'%20fill%3D'white'%2F%253E%253Cpath%20d%3D'M20%2030h25l5-10h30l0%2010h0v50H20V30z'%20fill%3D'%2523f59e0b'%2F%253E%253Cpath%20d%3D'M20%2040h60v40H20z'%20fill%3D'%2523fbbf24'%2F%253E%253C%2Fsvg%253E%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%2C%22sizes%22%3A%22any%22%7D%5D%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22theme_color%22%3A%22%23fafafa%22%2C%22background_color%22%3A%22%23ffffff%22%7D">
+    <link rel="manifest" href="data:application/manifest+json,%7B%22short_name%22%3A%22Sync%22%2C%22name%22%3A%22Phone%20PC%20Sync%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%253E%253Crect%20width%3D'100'%20height%3D'100'%20fill%3D'%2523fff'%2F%253E%253Cpath%20d%3D'M15%2025h25l5-8h35v8h0v45H15V25z'%20fill%3D'%2523222'%2F%253E%253Cpath%20d%3D'M15%2032h65v38H15z'%20fill%3D'%2523333'%2F%253E%253Ccircle%20cx%3D'72'%20cy%3D'62'%20r%3D'18'%20fill%3D'%25232563eb'%2F%253E%253Cpath%20d%3D'M72%2052%20L78%2058%20L72%2058%20L72%2052%20M66%2066%20L72%2072%20L72%2066%20L66%2066'%20fill%3D'white'%2F%253E%253Cpath%20d%3D'M72%2052%20C79%2052%2084%2057%2084%2064'%20stroke%3D'white'%20stroke-width%3D'3'%20fill%3D'none'%2F%253E%253Cpath%20d%3D'M72%2072%20C65%2072%2060%2067%2060%2060'%20stroke%3D'white'%20stroke-width%3D'3'%20fill%3D'none'%2F%253E%253C%2Fsvg%253E%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%2C%22sizes%22%3A%22any%22%7D%5D%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22theme_color%22%3A%22%23fafafa%22%2C%22background_color%22%3A%22%23ffffff%22%7D">
     
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -566,6 +603,85 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
 
         input[type="file"] { display: none; }
 
+        /* Text Sync Section */
+        .text-sync-area {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+            padding: 16px;
+        }
+
+        .text-sync-textarea {
+            width: 100%;
+            min-height: 120px;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 12px;
+            font-family: system-ui, -apple-system, sans-serif;
+            font-size: 14px;
+            resize: vertical;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .text-sync-textarea:focus {
+            border-color: #2563eb;
+        }
+
+        .text-sync-textarea::placeholder {
+            color: #aaa;
+        }
+
+        .text-sync-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .text-btn {
+            flex: 1;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid #e0e0e0;
+            background: #f5f5f5;
+            color: #444;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .text-btn:active {
+            background: #e8e8e8;
+        }
+
+        .text-btn.primary {
+            background: #222;
+            color: white;
+            border-color: #222;
+        }
+
+        .text-btn.primary:active {
+            background: #444;
+        }
+
+        .text-btn.success {
+            background: #22c55e;
+            color: white;
+            border-color: #22c55e;
+        }
+
+        .text-char-count {
+            text-align: right;
+            font-size: 11px;
+            color: #aaa;
+            margin-top: 8px;
+        }
+
         /* Hint at bottom */
         .hint {
             margin-top: auto;
@@ -599,6 +715,18 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
                 <div class="empty-state">Loading...</div>
             </div>
 
+        </div>
+
+        <!-- Text Sync Section -->
+        <div class="section" id="textSyncSection">
+            <div class="section-title">Text Sync</div>
+            <div class="text-sync-area">
+                <textarea class="text-sync-textarea" id="syncTextarea" placeholder="Type or paste text here to sync between devices..."></textarea>
+                <div class="text-char-count"><span id="charCount">0</span> characters</div>
+                <div class="text-sync-buttons">
+                    <button class="text-btn primary" id="syncTextBtn">🔄 Sync</button>
+                </div>
+            </div>
         </div>
 
         <input type="file" id="fileInput" multiple>
@@ -719,7 +847,7 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
             `).join('');
 
             sendBtn.style.display = 'block';
-            const target = isMobile ? 'PC' : 'Phone';
+            const target = !isDesktop ? 'PC' : 'Phone';
             sendBtn.textContent = `Send ${pendingFiles.length} file${pendingFiles.length > 1 ? 's' : ''} to ${target}`;
 
             // Add remove handlers
@@ -832,11 +960,68 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
             }, 500);
         }
 
+        // ========== TEXT SYNC FUNCTIONALITY ==========
+        const syncTextarea = document.getElementById('syncTextarea');
+        const charCount = document.getElementById('charCount');
+        const syncTextBtn = document.getElementById('syncTextBtn');
 
+        // Update character count
+        syncTextarea.addEventListener('input', () => {
+            charCount.textContent = syncTextarea.value.length;
+        });
+
+        // Sync text to server
+        syncTextBtn.onclick = async () => {
+            const originalText = syncTextBtn.innerHTML;
+            syncTextBtn.disabled = true;
+            syncTextBtn.innerHTML = '<span class="spinner"></span>Syncing...';
+
+            try {
+                const res = await fetch('/text', {
+                    method: 'POST',
+                    body: syncTextarea.value,
+                    headers: { 'Content-Type': 'text/plain' }
+                });
+
+                if (res.ok) {
+                    syncTextBtn.classList.add('success');
+                    syncTextBtn.textContent = '✓ Synced!';
+                    showStatus('Text synced successfully', 'success');
+                    if (navigator.vibrate) navigator.vibrate(50);
+                    
+                    setTimeout(() => {
+                        syncTextBtn.classList.remove('success');
+                        syncTextBtn.innerHTML = originalText;
+                    }, 1500);
+                } else {
+                    throw new Error('Sync failed');
+                }
+            } catch (e) {
+                showStatus('Failed to sync text', 'error');
+                syncTextBtn.innerHTML = originalText;
+            }
+            
+            syncTextBtn.disabled = false;
+        };
+
+        // Load synced text from server
+        async function loadSyncedText() {
+            try {
+                const res = await fetch('/text');
+                const data = await res.json();
+                if (data.text) {
+                    syncTextarea.value = data.text;
+                    charCount.textContent = data.text.length;
+                }
+            } catch (e) {
+                console.log('Could not load synced text');
+            }
+        }
 
         // Initialize
         updateUIForDevice();
         loadMacFiles();
+        loadSyncedText();
     </script>
 </body>
 </html>'''
