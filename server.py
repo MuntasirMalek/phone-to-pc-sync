@@ -276,14 +276,12 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
     <meta name="theme-color" content="#fafafa">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>🔄 Sync</title>
+    <title>Phone PC Sync</title>
 
     <!-- App Icon - Folder with Sync Badge -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23fafafa'/%3E%3Cpath d='M15 25h25l5-8h35v8h0v45H15V25z' fill='%23222'/%3E%3Cpath d='M15 32h65v38H15z' fill='%23333'/%3E%3Ccircle cx='72' cy='62' r='18' fill='%232563eb'/%3E%3Cpath d='M72 52 L78 58 L72 58 L72 52 M66 66 L72 72 L72 66 L66 66' fill='white'/%3E%3Cpath d='M72 52 C79 52 84 57 84 64' stroke='white' stroke-width='3' fill='none'/%3E%3Cpath d='M72 72 C65 72 60 67 60 60' stroke='white' stroke-width='3' fill='none'/%3E%3C/svg%3E">
     <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23fff'/%3E%3Cpath d='M15 25h25l5-8h35v8h0v45H15V25z' fill='%23222'/%3E%3Cpath d='M15 32h65v38H15z' fill='%23333'/%3E%3Ccircle cx='72' cy='62' r='18' fill='%232563eb'/%3E%3Cpath d='M72 52 L78 58 L72 58 L72 52 M66 66 L72 72 L72 66 L66 66' fill='white'/%3E%3Cpath d='M72 52 C79 52 84 57 84 64' stroke='white' stroke-width='3' fill='none'/%3E%3Cpath d='M72 72 C65 72 60 67 60 60' stroke='white' stroke-width='3' fill='none'/%3E%3C/svg%3E">
 
-    <!-- Web Manifest -->
-    <link rel="manifest" href="data:application/manifest+json,%7B%22short_name%22%3A%22Sync%22%2C%22name%22%3A%22Phone%20PC%20Sync%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%253E%253Crect%20width%3D'100'%20height%3D'100'%20fill%3D'%2523fff'%2F%253E%253Cpath%20d%3D'M15%2025h25l5-8h35v8h0v45H15V25z'%20fill%3D'%2523222'%2F%253E%253Cpath%20d%3D'M15%2032h65v38H15z'%20fill%3D'%2523333'%2F%253E%253Ccircle%20cx%3D'72'%20cy%3D'62'%20r%3D'18'%20fill%3D'%25232563eb'%2F%253E%253Cpath%20d%3D'M72%2052%20L78%2058%20L72%2058%20L72%2052%20M66%2066%20L72%2072%20L72%2066%20L66%2066'%20fill%3D'white'%2F%253E%253Cpath%20d%3D'M72%2052%20C79%2052%2084%2057%2084%2064'%20stroke%3D'white'%20stroke-width%3D'3'%20fill%3D'none'%2F%253E%253Cpath%20d%3D'M72%2072%20C65%2072%2060%2067%2060%2060'%20stroke%3D'white'%20stroke-width%3D'3'%20fill%3D'none'%2F%253E%253C%2Fsvg%253E%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%2C%22sizes%22%3A%22any%22%7D%5D%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22theme_color%22%3A%22%23fafafa%22%2C%22background_color%22%3A%22%23ffffff%22%7D">
     
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
