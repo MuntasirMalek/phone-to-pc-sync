@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Downloads Sync
-Sync files between your Android Download and your PC's Downloads folder.
+Phone PC Sync
+Sync files, text, and photos between your Android phone and your PC.
+Camera to clipboard: Snap a photo → Ctrl+V on your computer.
 Works on Mac, Windows, and Linux. 100% private via your own WiFi.
 """
 
@@ -1775,13 +1776,14 @@ def main():
     local_ip = get_local_ip()
 
     print("\n" + "="*50)
-    print("📁 Downloads Sync")
+    print("📱 Phone PC Sync")
     print("="*50)
     print(f"\n🌐 Server running at: http://{local_ip}:{PORT}")
     print(f"\n📱 Open this URL on your phone's browser")
     print(f"📂 Files will be saved to: {DOWNLOADS_FOLDER}")
+    print(f"📸 Camera photos will be copied to clipboard")
     print("\n" + "="*50)
-    print("Waiting for file transfers...\n")
+    print("Waiting for connections...\n")
 
     server = http.server.HTTPServer(('0.0.0.0', PORT), FileTransferHandler)
     server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
