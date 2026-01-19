@@ -12,6 +12,8 @@ import platform
 import json
 import urllib.parse
 import mimetypes
+import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -72,6 +74,93 @@ def get_file_icon(filename):
     else:
         return FILE_ICONS['default']
 
+
+def copy_image_to_clipboard(image_path):
+    """Copy an image to clipboard. Returns (success, error_message)."""
+    try:
+        if SYSTEM == 'Darwin':  # macOS
+            # Use TIFF format which works for both PNG and JPEG
+            applescript = f'''
+            set theFile to POSIX file "{image_path}"
+            set theImage to read theFile as TIFF picture
+            set the clipboard to theImage
+            '''
+            result = subprocess.run(
+                ['osascript', '-e', applescript],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                return True, None
+            
+            # Fallback: using NSPasteboard via AppleScript
+            fallback_script = f'''
+            use framework "AppKit"
+            set theImage to current application's NSImage's alloc()'s initWithContentsOfFile:"{image_path}"
+            set thePasteboard to current application's NSPasteboard's generalPasteboard()
+            thePasteboard's clearContents()
+            thePasteboard's writeObjects:{{theImage}}
+            '''
+            result2 = subprocess.run(
+                ['osascript', '-e', fallback_script],
+                capture_output=True,
+                text=True
+            )
+            if result2.returncode == 0:
+                return True, None
+            return False, result.stderr
+            
+        elif SYSTEM == 'Windows':
+            # PowerShell command to copy image to clipboard
+            ps_script = f'''
+            Add-Type -AssemblyName System.Windows.Forms
+            $image = [System.Drawing.Image]::FromFile("{image_path}")
+            [System.Windows.Forms.Clipboard]::SetImage($image)
+            '''
+            result = subprocess.run(
+                ['powershell', '-Command', ps_script],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                return True, None
+            return False, result.stderr
+            
+        elif SYSTEM == 'Linux':
+            # Use xclip for Linux (most common)
+            try:
+                with open(image_path, 'rb') as f:
+                    result = subprocess.run(
+                        ['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i'],
+                        stdin=f,
+                        capture_output=True
+                    )
+                if result.returncode == 0:
+                    return True, None
+            except FileNotFoundError:
+                pass
+            
+            # Try xsel as fallback
+            try:
+                with open(image_path, 'rb') as f:
+                    result = subprocess.run(
+                        ['xsel', '--clipboard', '--input', '--type', 'image/png'],
+                        stdin=f,
+                        capture_output=True
+                    )
+                if result.returncode == 0:
+                    return True, None
+            except FileNotFoundError:
+                pass
+            
+            return False, "Install xclip: sudo apt install xclip"
+            
+        else:
+            return False, f"Unsupported OS: {SYSTEM}"
+            
+    except Exception as e:
+        return False, str(e)
+
 def format_file_size(size_bytes):
     """Format file size in human readable format."""
     for unit in ['B', 'KB', 'MB', 'GB']:
@@ -130,7 +219,44 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
                 self.send_error(500, str(e))
             return
         
-        # Handle file upload
+        # Handle clipboard image (camera paster feature)
+        if path == '/clipboard':
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                
+                if content_length == 0:
+                    self.send_error(400, "No image data received")
+                    return
+                
+                # Read the image data
+                image_data = self.rfile.read(content_length)
+                
+                # Save to temp file
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                temp_path = os.path.join(tempfile.gettempdir(), f"clipboard_photo_{timestamp}.png")
+                
+                with open(temp_path, 'wb') as f:
+                    f.write(image_data)
+                
+                # Copy to clipboard (cross-platform)
+                success, error = copy_image_to_clipboard(temp_path)
+                
+                if success:
+                    print(f"✅ Photo copied to clipboard! ({len(image_data)} bytes)")
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/plain')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(b"Photo copied to clipboard!")
+                else:
+                    print(f"❌ Clipboard error: {error}")
+                    self.send_error(500, f"Clipboard error: {error}")
+                    
+            except Exception as e:
+                print(f"❌ Clipboard error: {e}")
+                self.send_error(500, str(e))
+            return
+        
         try:
             content_type = self.headers.get('Content-Type', '')
             content_length = int(self.headers.get('Content-Length', 0))
@@ -689,40 +815,341 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
             text-align: center;
             line-height: 1.8;
         }
+
+        /* Tab Navigation */
+        .tab-nav {
+            display: flex;
+            gap: 0;
+            margin-bottom: 25px;
+            background: #f0f0f0;
+            border-radius: 12px;
+            padding: 4px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 12px 8px;
+            border: none;
+            background: transparent;
+            font-size: 13px;
+            font-weight: 500;
+            color: #666;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .tab-btn.active {
+            background: white;
+            color: #222;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .tab-btn:active {
+            transform: scale(0.98);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Camera Section Styles */
+        .camera-area {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .preview-area {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 30vh;
+            margin-bottom: 20px;
+        }
+
+        #cameraPreview {
+            max-width: 100%;
+            max-height: 30vh;
+            border-radius: 8px;
+            display: none;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.12);
+            object-fit: contain;
+            transition: transform 0.2s ease;
+        }
+
+        .camera-placeholder {
+            color: #ccc;
+            font-size: 13px;
+            letter-spacing: 1px;
+        }
+
+        .camera-controls {
+            display: none;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .rotate-btn, .crop-btn, .camera-send-btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.15s;
+        }
+
+        .rotate-btn, .crop-btn {
+            background: #f0f0f0;
+            border: 1px solid #ddd;
+            color: #333;
+        }
+
+        .rotate-btn:active, .crop-btn:active {
+            background: #e0e0e0;
+        }
+
+        .camera-send-btn {
+            background: #222;
+            border: none;
+            color: white;
+        }
+
+        .camera-send-btn:active {
+            background: #444;
+        }
+
+        #cameraStatus {
+            height: 24px;
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 20px;
+        }
+
+        #cameraStatus.success { color: #22c55e; }
+        #cameraStatus.error { color: #ef4444; }
+
+        .shutter-wrap {
+            position: relative;
+            width: 80px;
+            height: 80px;
+        }
+
+        .shutter {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 4px solid #222;
+            background: white;
+            cursor: pointer;
+            position: relative;
+            transition: transform 0.1s;
+        }
+
+        .shutter::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: #222;
+            transition: all 0.15s;
+        }
+
+        .shutter:active {
+            transform: scale(0.92);
+        }
+
+        .shutter:active::after {
+            width: 48px;
+            height: 48px;
+            background: #444;
+        }
+
+        .shutter.flash::after {
+            background: #22c55e;
+        }
+
+        .gallery-link {
+            margin-top: 20px;
+            font-size: 13px;
+            color: #888;
+            text-decoration: underline;
+            cursor: pointer;
+            background: none;
+            border: none;
+            font-family: inherit;
+        }
+
+        .camera-hint {
+            margin-top: 30px;
+            font-size: 11px;
+            color: #bbb;
+            text-align: center;
+            line-height: 1.8;
+        }
+
+        /* Crop Overlay */
+        #cropOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.95);
+            z-index: 1000;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .crop-container {
+            position: relative;
+            max-width: 90%;
+            max-height: 60vh;
+        }
+
+        #cropImage {
+            max-width: 100%;
+            max-height: 60vh;
+            display: block;
+        }
+
+        .crop-box {
+            position: absolute;
+            border: 2px solid #fff;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.5);
+            cursor: move;
+            touch-action: none;
+        }
+
+        .resize-handle {
+            position: absolute;
+            bottom: -8px;
+            right: -8px;
+            width: 24px;
+            height: 24px;
+            background: #fff;
+            border-radius: 50%;
+            cursor: nwse-resize;
+            touch-action: none;
+        }
+
+        .crop-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+        }
     </style>
 </head>
 <body>
     <div class="app">
 
-        <!-- Upload Section -->
-        <div class="section" id="uploadSection">
-            <div class="section-title" id="uploadSectionTitle">Send to Phone</div>
-            <div class="upload-area">
-                <button class="upload-btn" id="uploadBtn" aria-label="Choose files"></button>
-                <div class="upload-hint">Tap to choose files</div>
-                
-                <div class="pending-files" id="pendingFiles"></div>
-                <button class="send-all-btn" id="sendBtn" style="display: none;">Send</button>
+        <!-- Tab Navigation (mobile only) -->
+        <div class="tab-nav" id="tabNav" style="display: none;">
+            <button class="tab-btn active" data-tab="files">📁 Files</button>
+            <button class="tab-btn" data-tab="camera">📸 Camera</button>
+            <button class="tab-btn" data-tab="text">📝 Text</button>
+        </div>
+
+        <!-- Files Tab Content -->
+        <div class="tab-content active" id="filesTab">
+            <!-- Upload Section -->
+            <div class="section" id="uploadSection">
+                <div class="section-title" id="uploadSectionTitle">Send to Phone</div>
+                <div class="upload-area">
+                    <button class="upload-btn" id="uploadBtn" aria-label="Choose files"></button>
+                    <div class="upload-hint">Tap to choose files</div>
+                    
+                    <div class="pending-files" id="pendingFiles"></div>
+                    <button class="send-all-btn" id="sendBtn" style="display: none;">Send</button>
+                </div>
+            </div>
+
+            <!-- Download Section -->
+            <div class="section" id="downloadSection">
+                <div class="section-title" id="downloadSectionTitle">Download from PC</div>
+                <div class="mac-files" id="macFiles">
+                    <div class="empty-state">Loading...</div>
+                </div>
             </div>
         </div>
 
-        <!-- Download Section -->
-        <div class="section" id="downloadSection">
-            <div class="section-title" id="downloadSectionTitle">Download from PC</div>
-            <div class="mac-files" id="macFiles">
-                <div class="empty-state">Loading...</div>
-            </div>
+        <!-- Camera Tab Content -->
+        <div class="tab-content" id="cameraTab">
+            <div class="camera-area">
+                <div class="preview-area">
+                    <img id="cameraPreview">
+                    <span class="camera-placeholder" id="cameraPlaceholder">Your photo will appear here</span>
+                </div>
 
+                <div class="camera-controls" id="cameraControls">
+                    <button class="rotate-btn" id="rotateBtn">↻</button>
+                    <button class="crop-btn" id="cropBtn">✂ Crop</button>
+                    <button class="camera-send-btn" id="cameraSendBtn">Send to Clipboard</button>
+                </div>
+
+                <div id="cameraStatus"></div>
+
+                <input type="file" id="cameraInput" accept="image/*" capture>
+                <input type="file" id="galleryInput" accept="image/*">
+
+                <div class="shutter-wrap">
+                    <button class="shutter" id="shutterBtn" aria-label="Take photo"></button>
+                </div>
+
+                <button class="gallery-link" id="galleryBtn">or choose from gallery</button>
+
+                <div class="camera-hint">
+                    Take a photo → Paste on your computer<br>
+                    <strong>Ctrl+V</strong> (Windows/Linux) or <strong>Cmd+V</strong> (Mac)
+                </div>
+            </div>
         </div>
 
-        <!-- Text Sync Section -->
-        <div class="section" id="textSyncSection">
-            <div class="section-title">Text Sync</div>
-            <div class="text-sync-area">
-                <textarea class="text-sync-textarea" id="syncTextarea" placeholder="Type or paste text here to sync between devices..."></textarea>
-                <div class="text-char-count"><span id="charCount">0</span> characters</div>
-                <div class="text-sync-buttons">
-                    <button class="text-btn primary" id="syncTextBtn">🔄 Sync</button>
+        <!-- Crop Overlay -->
+        <div id="cropOverlay">
+            <div class="crop-container" id="cropContainer">
+                <img id="cropImage">
+                <div class="crop-box" id="cropBox">
+                    <div class="resize-handle" id="resizeHandle"></div>
+                </div>
+            </div>
+            <div class="crop-actions">
+                <button class="rotate-btn" id="cropCancel">Cancel</button>
+                <button class="camera-send-btn" id="cropApply">Apply Crop</button>
+            </div>
+        </div>
+
+        <!-- Text Tab Content -->
+        <div class="tab-content" id="textTab">
+            <div class="section">
+                <div class="section-title">Text Sync</div>
+                <div class="text-sync-area">
+                    <textarea class="text-sync-textarea" id="syncTextarea" placeholder="Type or paste text here to sync between devices..."></textarea>
+                    <div class="text-char-count"><span id="charCount">0</span> characters</div>
+                    <div class="text-sync-buttons">
+                        <button class="text-btn primary" id="syncTextBtn">🔄 Sync</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1016,10 +1443,312 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
             }
         }
 
+        // ========== TAB NAVIGATION ==========
+        const tabNav = document.getElementById('tabNav');
+        const tabBtns = document.querySelectorAll('.tab-btn');
+        const tabContents = document.querySelectorAll('.tab-content');
+
+        function switchTab(tabId) {
+            tabBtns.forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tabId);
+            });
+            tabContents.forEach(content => {
+                content.classList.toggle('active', content.id === tabId + 'Tab');
+            });
+        }
+
+        tabBtns.forEach(btn => {
+            btn.onclick = () => switchTab(btn.dataset.tab);
+        });
+
+        // ========== CAMERA FUNCTIONALITY ==========
+        const cameraInput = document.getElementById('cameraInput');
+        const galleryInput = document.getElementById('galleryInput');
+        const cameraPreview = document.getElementById('cameraPreview');
+        const cameraPlaceholder = document.getElementById('cameraPlaceholder');
+        const cameraControls = document.getElementById('cameraControls');
+        const cameraStatus = document.getElementById('cameraStatus');
+        const shutterBtn = document.getElementById('shutterBtn');
+        const galleryBtn = document.getElementById('galleryBtn');
+        const rotateBtn = document.getElementById('rotateBtn');
+        const cropBtn = document.getElementById('cropBtn');
+        const cameraSendBtn = document.getElementById('cameraSendBtn');
+        
+        // Crop elements
+        const cropOverlay = document.getElementById('cropOverlay');
+        const cropImage = document.getElementById('cropImage');
+        const cropBox = document.getElementById('cropBox');
+        const cropCancel = document.getElementById('cropCancel');
+        const cropApply = document.getElementById('cropApply');
+        const resizeHandle = document.getElementById('resizeHandle');
+        
+        let currentCameraFile = null;
+        let rotation = 0;
+        let previewUrl = null;
+
+        shutterBtn.onclick = () => cameraInput.click();
+        galleryBtn.onclick = () => galleryInput.click();
+
+        function cleanupCamera() {
+            if (previewUrl) {
+                URL.revokeObjectURL(previewUrl);
+                previewUrl = null;
+            }
+        }
+
+        function resetCameraUI() {
+            cleanupCamera();
+            currentCameraFile = null;
+            rotation = 0;
+            cameraPreview.style.display = 'none';
+            cameraPreview.style.transform = 'rotate(0deg)';
+            cameraPreview.src = '';
+            cameraPlaceholder.style.display = 'block';
+            cameraControls.style.display = 'none';
+        }
+
+        function loadCameraImage(file) {
+            if (!file) return;
+            
+            cleanupCamera();
+            currentCameraFile = file;
+            rotation = 0;
+            
+            previewUrl = URL.createObjectURL(file);
+            cameraPreview.src = previewUrl;
+            cameraPreview.style.display = 'block';
+            cameraPreview.style.transform = 'rotate(0deg)';
+            cameraPlaceholder.style.display = 'none';
+            cameraControls.style.display = 'flex';
+            cameraStatus.textContent = '';
+            cameraStatus.className = '';
+        }
+
+        rotateBtn.onclick = () => {
+            rotation = (rotation + 90) % 360;
+            cameraPreview.style.transform = `rotate(${rotation}deg)`;
+        };
+
+        // Crop functionality
+        cropBtn.onclick = () => {
+            if (!currentCameraFile) return;
+            cropImage.src = previewUrl;
+            cropOverlay.style.display = 'flex';
+            
+            cropImage.onload = () => {
+                const rect = cropImage.getBoundingClientRect();
+                const size = Math.min(rect.width, rect.height) * 0.8;
+                cropBox.style.width = size + 'px';
+                cropBox.style.height = size + 'px';
+                cropBox.style.left = ((rect.width - size) / 2) + 'px';
+                cropBox.style.top = ((rect.height - size) / 2) + 'px';
+            };
+        };
+
+        cropCancel.onclick = () => {
+            cropOverlay.style.display = 'none';
+        };
+
+        cropApply.onclick = async () => {
+            const imgRect = cropImage.getBoundingClientRect();
+            const boxRect = cropBox.getBoundingClientRect();
+            
+            const scaleX = cropImage.naturalWidth / imgRect.width;
+            const scaleY = cropImage.naturalHeight / imgRect.height;
+            
+            const cropData = {
+                x: (boxRect.left - imgRect.left) * scaleX,
+                y: (boxRect.top - imgRect.top) * scaleY,
+                width: boxRect.width * scaleX,
+                height: boxRect.height * scaleY
+            };
+            
+            currentCameraFile = await applyCrop(currentCameraFile, cropData);
+            
+            cleanupCamera();
+            previewUrl = URL.createObjectURL(currentCameraFile);
+            cameraPreview.src = previewUrl;
+            cameraPreview.style.transform = 'rotate(0deg)';
+            rotation = 0;
+            
+            cropOverlay.style.display = 'none';
+        };
+
+        // Crop box drag and resize
+        let isDragging = false;
+        let isResizing = false;
+        let startX, startY, startLeft, startTop, startW, startH;
+
+        resizeHandle.addEventListener('touchstart', (e) => {
+            isResizing = true;
+            const touch = e.touches[0];
+            startX = touch.clientX;
+            startY = touch.clientY;
+            startW = cropBox.offsetWidth;
+            startH = cropBox.offsetHeight;
+            e.preventDefault();
+            e.stopPropagation();
+        });
+
+        cropBox.addEventListener('touchstart', (e) => {
+            if (isResizing) return;
+            isDragging = true;
+            const touch = e.touches[0];
+            startX = touch.clientX;
+            startY = touch.clientY;
+            startLeft = cropBox.offsetLeft;
+            startTop = cropBox.offsetTop;
+            e.preventDefault();
+        });
+
+        document.addEventListener('touchmove', (e) => {
+            if (!isDragging && !isResizing) return;
+            const touch = e.touches[0];
+            const imgRect = cropImage.getBoundingClientRect();
+            
+            if (isResizing) {
+                const dx = touch.clientX - startX;
+                const dy = touch.clientY - startY;
+                let newW = Math.max(50, startW + dx);
+                let newH = Math.max(50, startH + dy);
+                newW = Math.min(newW, imgRect.width - cropBox.offsetLeft);
+                newH = Math.min(newH, imgRect.height - cropBox.offsetTop);
+                cropBox.style.width = newW + 'px';
+                cropBox.style.height = newH + 'px';
+            } else if (isDragging) {
+                const dx = touch.clientX - startX;
+                const dy = touch.clientY - startY;
+                const boxW = cropBox.offsetWidth;
+                const boxH = cropBox.offsetHeight;
+                let newLeft = Math.max(0, Math.min(imgRect.width - boxW, startLeft + dx));
+                let newTop = Math.max(0, Math.min(imgRect.height - boxH, startTop + dy));
+                cropBox.style.left = newLeft + 'px';
+                cropBox.style.top = newTop + 'px';
+            }
+        });
+
+        document.addEventListener('touchend', () => {
+            isDragging = false;
+            isResizing = false;
+        });
+
+        async function applyCrop(file, crop) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                const url = URL.createObjectURL(file);
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = crop.width;
+                    canvas.height = crop.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+                    canvas.toBlob((blob) => {
+                        URL.revokeObjectURL(url);
+                        resolve(blob);
+                    }, 'image/png');
+                };
+                img.src = url;
+            });
+        }
+
+        async function rotateImage(file, degrees) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                const url = URL.createObjectURL(file);
+                
+                img.onload = () => {
+                    try {
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        
+                        if (degrees === 90 || degrees === 270) {
+                            canvas.width = img.height;
+                            canvas.height = img.width;
+                        } else {
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                        }
+                        
+                        ctx.translate(canvas.width / 2, canvas.height / 2);
+                        ctx.rotate(degrees * Math.PI / 180);
+                        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+                        
+                        canvas.toBlob((blob) => {
+                            URL.revokeObjectURL(url);
+                            resolve(blob);
+                        }, 'image/png');
+                    } catch (e) {
+                        URL.revokeObjectURL(url);
+                        reject(e);
+                    }
+                };
+                
+                img.onerror = () => {
+                    URL.revokeObjectURL(url);
+                    reject(new Error('Failed to load image'));
+                };
+                
+                img.src = url;
+            });
+        }
+
+        cameraSendBtn.onclick = async () => {
+            if (!currentCameraFile) return;
+            
+            cameraSendBtn.disabled = true;
+            cameraStatus.textContent = 'Sending...';
+            cameraStatus.className = 'loading';
+            
+            try {
+                let blob = currentCameraFile;
+                
+                if (rotation !== 0) {
+                    blob = await rotateImage(currentCameraFile, rotation);
+                }
+                
+                const res = await fetch('/clipboard', {
+                    method: 'POST',
+                    body: blob,
+                    headers: { 'Content-Type': 'image/png' }
+                });
+                
+                if (res.ok) {
+                    cameraStatus.textContent = '✓ Copied to clipboard!';
+                    cameraStatus.className = 'success';
+                    shutterBtn.classList.add('flash');
+                    setTimeout(() => shutterBtn.classList.remove('flash'), 300);
+                    if (navigator.vibrate) navigator.vibrate(50);
+                    cameraControls.style.display = 'none';
+                    currentCameraFile = null;
+                } else {
+                    cameraStatus.textContent = 'Failed - tap to retry';
+                    cameraStatus.className = 'error';
+                }
+            } catch (e) {
+                cameraStatus.textContent = 'No connection';
+                cameraStatus.className = 'error';
+            } finally {
+                cameraSendBtn.disabled = false;
+            }
+        };
+
+        cameraInput.onchange = (e) => { loadCameraImage(e.target.files[0]); e.target.value = ''; };
+        galleryInput.onchange = (e) => { loadCameraImage(e.target.files[0]); e.target.value = ''; };
+
+        // ========== UPDATED INITIALIZATION ==========
+        function initApp() {
+            updateUIForDevice();
+            loadMacFiles();
+            loadSyncedText();
+            
+            // Show tabs on mobile only
+            if (!isDesktop) {
+                tabNav.style.display = 'flex';
+            }
+        }
+
         // Initialize
-        updateUIForDevice();
-        loadMacFiles();
-        loadSyncedText();
+        initApp();
     </script>
 </body>
 </html>'''

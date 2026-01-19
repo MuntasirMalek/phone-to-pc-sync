@@ -8,6 +8,7 @@ Sync files and text between your Android phone and your computer.
 - 📱 **Phone → PC**: Pick files from Android → instantly appear in your PC Downloads
 - 💻 **PC → Phone**: Tap any PC file → downloads to your Android
 - 📝 **Text Sync**: Share text/code snippets between devices instantly
+- 📸 **Camera → Clipboard**: Snap a photo on your phone → Ctrl+V/Cmd+V on your PC!
 - 🔒 **Private**: Everything stays on your local network
 - 💻 **Cross-platform**: Works on Mac, Windows, and Linux
 
@@ -70,6 +71,13 @@ You'll see a URL like:
 2. Tap "Sync" to save
 3. Open the same URL on your other device
 4. The text appears automatically!
+
+**📸 Camera → Clipboard:**
+1. Switch to the "Camera" tab on your phone
+2. Tap the shutter button to take a photo (or choose from gallery)
+3. Optionally rotate or crop the image
+4. Tap "Send to Clipboard"
+5. On your PC, paste (Ctrl+V / Cmd+V) anywhere – the image is ready!
 
 ### 5. Stop / Uninstall
 
