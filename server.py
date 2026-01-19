@@ -1193,6 +1193,9 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
                 uploadSectionTitle.textContent = 'Send to Phone';
                 downloadSection.style.display = 'none';
                 hintText.innerHTML = 'Pick files here → Download them on your phone<br>Or open this URL on your phone to send files to your PC';
+                
+                // Show Text Sync section on Desktop
+                document.getElementById('textTab').style.display = 'block';
             } else {
                 // Mobile: Show both sections
                 uploadSectionTitle.textContent = 'Send to PC';
