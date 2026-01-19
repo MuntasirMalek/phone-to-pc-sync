@@ -1,12 +1,13 @@
-# 📁 Downloads Sync
+# � Phone PC Sync
 
-Sync files between your Android Download and your computer's Downloads folder.  
+Sync files and text between your Android phone and your computer.  
 ⚡ Lightning fast · 🔒 100% private via your own WiFi · ☁️ No cloud
 
 ## ✨ Features
 
 - 📱 **Phone → PC**: Pick files from Android → instantly appear in your PC Downloads
 - 💻 **PC → Phone**: Tap any PC file → downloads to your Android
+- 📝 **Text Sync**: Share text/code snippets between devices instantly
 - 🔒 **Private**: Everything stays on your local network
 - 💻 **Cross-platform**: Works on Mac, Windows, and Linux
 
@@ -63,6 +64,12 @@ You'll see a URL like:
 **PC → Phone:**
 1. Scroll down to see your PC's Downloads files
 2. Tap any file to download it to your phone
+
+**Text Sync:**
+1. Type or paste text in the "Text Sync" section
+2. Tap "Sync" to save
+3. Open the same URL on your other device
+4. The text appears automatically!
 
 ### 5. Stop / Uninstall
 
