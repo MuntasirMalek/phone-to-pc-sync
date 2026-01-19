@@ -1,4 +1,4 @@
-# � Phone PC Sync
+# 📱 Phone PC Sync
 
 Sync files and text between your Android phone and your computer.  
 ⚡ Lightning fast · 🔒 100% private via your own WiFi · ☁️ No cloud
