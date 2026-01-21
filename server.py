@@ -280,15 +280,8 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
             # Read file data
             file_data = self.rfile.read(content_length)
             
-            # Save to Downloads folder
+            # Save to Downloads folder (overwrite if exists)
             file_path = os.path.join(DOWNLOADS_FOLDER, filename)
-            
-            # Handle duplicate filenames
-            base, ext = os.path.splitext(filename)
-            counter = 1
-            while os.path.exists(file_path):
-                file_path = os.path.join(DOWNLOADS_FOLDER, f"{base}_{counter}{ext}")
-                counter += 1
             
             with open(file_path, 'wb') as f:
                 f.write(file_data)
