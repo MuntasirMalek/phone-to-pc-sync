@@ -1374,19 +1374,33 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
             }
         }
 
-        function downloadFile(filename) {
-            showStatus('Starting download...', 'loading', 0);
+        async function downloadFile(filename) {
+            showStatus('Downloading...', 'loading', 0);
             
-            const link = document.createElement('a');
-            link.href = `/download/${encodeURIComponent(filename)}`;
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            
-            setTimeout(() => {
+            try {
+                // Use fetch + blob to bypass insecure download warning
+                const response = await fetch(`/download/${encodeURIComponent(filename)}`);
+                if (!response.ok) {
+                    throw new Error('Download failed');
+                }
+                
+                const blob = await response.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                
+                const link = document.createElement('a');
+                link.href = blobUrl;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                // Clean up the blob URL after a short delay
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+                
                 showStatus(`Downloaded: ${filename}`, 'success');
-            }, 500);
+            } catch (e) {
+                showStatus('Download failed', 'error');
+            }
         }
 
         // ========== TEXT SYNC FUNCTIONALITY ==========
