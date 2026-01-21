@@ -360,11 +360,25 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
             if not mime_type:
                 mime_type = 'application/octet-stream'
             
+            # Encode filename for Content-Disposition header (RFC 5987 for Unicode support)
+            try:
+                # Try ASCII first
+                filename.encode('ascii')
+                content_disposition = f'attachment; filename="{filename}"'
+            except UnicodeEncodeError:
+                # Use RFC 5987 encoding for Unicode filenames
+                encoded_filename = urllib.parse.quote(filename, safe='')
+                content_disposition = f"attachment; filename*=UTF-8''{encoded_filename}"
+            
             self.send_response(200)
             self.send_header('Content-Type', mime_type)
             self.send_header('Content-Length', str(file_size))
-            self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+            self.send_header('Content-Disposition', content_disposition)
             self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Filename')
+            self.send_header('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length')
+            self.send_header('Cache-Control', 'no-cache')
             self.end_headers()
             
             # Stream file in chunks
@@ -1363,9 +1377,12 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
 
                 // Add download handlers
                 macFilesEl.querySelectorAll('.file-item').forEach(item => {
-                    item.onclick = () => {
+                    item.onclick = (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         const filename = decodeURIComponent(item.dataset.filename);
                         downloadFile(filename);
+                        return false;
                     };
                 });
 
@@ -1374,33 +1391,23 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
             }
         }
 
-        async function downloadFile(filename) {
-            showStatus('Downloading...', 'loading', 0);
+        let isDownloading = false;
+        function downloadFile(filename) {
+            // Prevent duplicate downloads
+            if (isDownloading) return;
+            isDownloading = true;
             
-            try {
-                // Use fetch + blob to bypass insecure download warning
-                const response = await fetch(`/download/${encodeURIComponent(filename)}`);
-                if (!response.ok) {
-                    throw new Error('Download failed');
-                }
-                
-                const blob = await response.blob();
-                const blobUrl = URL.createObjectURL(blob);
-                
-                const link = document.createElement('a');
-                link.href = blobUrl;
-                link.download = filename;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                
-                // Clean up the blob URL after a short delay
-                setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-                
-                showStatus(`Downloaded: ${filename}`, 'success');
-            } catch (e) {
-                showStatus('Download failed', 'error');
-            }
+            // Direct download - the server handles Unicode filenames properly
+            const link = document.createElement('a');
+            link.href = `/download/${encodeURIComponent(filename)}`;
+            link.download = filename;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            // Reset after 2 seconds to allow new downloads
+            setTimeout(() => { isDownloading = false; }, 2000);
         }
 
         // ========== TEXT SYNC FUNCTIONALITY ==========
