@@ -15,6 +15,8 @@ import urllib.parse
 import mimetypes
 import subprocess
 import tempfile
+import zipfile
+import io
 from datetime import datetime
 from pathlib import Path
 
@@ -171,27 +173,60 @@ def format_file_size(size_bytes):
     return f"{size_bytes:.1f} TB"
 
 def get_files_list():
-    """Get list of files in Downloads folder."""
-    files = []
+    """Get list of files and folders in Downloads folder."""
+    items = []
     try:
         for entry in os.scandir(DOWNLOADS_FOLDER):
             # Skip hidden files/folders (starting with .)
             if entry.name.startswith('.'):
                 continue
+            stat = entry.stat()
             if entry.is_file():
-                stat = entry.stat()
-                files.append({
+                items.append({
                     'name': entry.name,
                     'size': stat.st_size,
                     'size_formatted': format_file_size(stat.st_size),
                     'modified': stat.st_mtime,
-                    'icon': get_file_icon(entry.name)
+                    'icon': get_file_icon(entry.name),
+                    'is_folder': False
+                })
+            elif entry.is_dir():
+                # Calculate folder size and file count
+                folder_size = 0
+                file_count = 0
+                try:
+                    for root, dirs, files in os.walk(entry.path):
+                        # Skip hidden directories
+                        dirs[:] = [d for d in dirs if not d.startswith('.')]
+                        for f in files:
+                            if not f.startswith('.'):
+                                file_count += 1
+                                try:
+                                    folder_size += os.path.getsize(os.path.join(root, f))
+                                except:
+                                    pass
+                except:
+                    pass
+                
+                items.append({
+                    'name': entry.name,
+                    'size': folder_size,
+                    'size_formatted': format_file_size(folder_size),
+                    'file_count': file_count,
+                    'modified': stat.st_mtime,
+                    'icon': '📁',
+                    'is_folder': True
                 })
         # Sort by modification time, newest first
-        files.sort(key=lambda x: x['modified'], reverse=True)
+        items.sort(key=lambda x: x['modified'], reverse=True)
     except Exception as e:
         print(f"Error listing files: {e}")
-    return files
+    return items
+
+
+class StreamingZipWriter:
+    """Not used anymore - kept for reference."""
+    pass
 
 
 class FileTransferHandler(http.server.BaseHTTPRequestHandler):
@@ -258,6 +293,76 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
                 self.send_error(500, str(e))
             return
         
+        # Handle folder upload (files with folder path)
+        if path == '/folder':
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                
+                if content_length == 0:
+                    self.send_error(400, "No file data received")
+                    return
+                
+                # Get the folder path from header
+                folder_path = self.headers.get('X-Folder-Path', '')
+                if folder_path:
+                    folder_path = urllib.parse.unquote(folder_path)
+                
+                filename = self.headers.get('X-Filename', '')
+                if filename:
+                    filename = urllib.parse.unquote(filename)
+                
+                if not folder_path:
+                    self.send_error(400, "Missing folder path")
+                    return
+                
+                # Sanitize the path to prevent directory traversal attacks
+                # Split and clean each part of the path
+                path_parts = folder_path.split('/')
+                clean_parts = []
+                for part in path_parts:
+                    # Skip empty parts, '.', and '..'
+                    if part and part != '.' and part != '..':
+                        # Remove any path-like characters from the part name
+                        clean_part = part.replace('\\', '').replace(':', '')
+                        if clean_part:
+                            clean_parts.append(clean_part)
+                
+                if not clean_parts:
+                    self.send_error(400, "Invalid folder path")
+                    return
+                
+                # Build the full path within Downloads folder
+                relative_path = os.path.join(*clean_parts)
+                full_path = os.path.join(DOWNLOADS_FOLDER, relative_path)
+                
+                # Create parent directories if they don't exist
+                parent_dir = os.path.dirname(full_path)
+                os.makedirs(parent_dir, exist_ok=True)
+                
+                # Read file data
+                file_data = self.rfile.read(content_length)
+                
+                # Save file
+                with open(full_path, 'wb') as f:
+                    f.write(file_data)
+                
+                print(f"📂 Folder file saved: {relative_path} ({format_file_size(len(file_data))})")
+                
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    'success': True,
+                    'path': relative_path,
+                    'size': len(file_data)
+                }).encode())
+                
+            except Exception as e:
+                print(f"❌ Folder upload error: {e}")
+                self.send_error(500, str(e))
+            return
+        
         try:
             content_type = self.headers.get('Content-Type', '')
             content_length = int(self.headers.get('Content-Length', 0))
@@ -314,6 +419,9 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
             self.serve_files_list()
         elif path == '/text':
             self.serve_synced_text()
+        elif path.startswith('/download-folder/'):
+            foldername = urllib.parse.unquote(path[17:])
+            self.serve_folder_download(foldername)
         elif path.startswith('/download/'):
             filename = urllib.parse.unquote(path[10:])
             self.serve_file_download(filename)
@@ -387,6 +495,87 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             print(f"❌ Download error: {e}")
             self.send_error(500, str(e))
+    
+    def serve_folder_download(self, foldername):
+        """Serve a folder as a zip file for download - uses temp file for valid zip."""
+        # Sanitize foldername to prevent directory traversal
+        foldername = os.path.basename(foldername)
+        folder_path = os.path.join(DOWNLOADS_FOLDER, foldername)
+        
+        if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
+            self.send_error(404, "Folder not found")
+            return
+        
+        temp_zip_path = None
+        try:
+            zip_filename = f"{foldername}.zip"
+            
+            # Encode filename for Content-Disposition header
+            try:
+                zip_filename.encode('ascii')
+                content_disposition = f'attachment; filename="{zip_filename}"'
+            except UnicodeEncodeError:
+                encoded_filename = urllib.parse.quote(zip_filename, safe='')
+                content_disposition = f"attachment; filename*=UTF-8''{encoded_filename}"
+            
+            print(f"📂 Creating zip for: {foldername}")
+            
+            # Create zip in temp file (fast with ZIP_STORED, no compression)
+            temp_zip_path = os.path.join(tempfile.gettempdir(), f"sync_{foldername}_{os.getpid()}.zip")
+            
+            total_files = 0
+            with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_STORED) as zip_file:
+                for root, dirs, files in os.walk(folder_path):
+                    # Skip hidden directories
+                    dirs[:] = [d for d in dirs if not d.startswith('.')]
+                    
+                    for file in files:
+                        # Skip hidden files
+                        if file.startswith('.'):
+                            continue
+                        
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.join(foldername, os.path.relpath(file_path, folder_path))
+                        
+                        try:
+                            zip_file.write(file_path, arcname)
+                            total_files += 1
+                        except Exception as e:
+                            print(f"  ⚠️ Skipped {file}: {e}")
+            
+            # Get zip size and stream it
+            zip_size = os.path.getsize(temp_zip_path)
+            print(f"📦 Zip created: {total_files} files, {format_file_size(zip_size)}")
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Length', str(zip_size))
+            self.send_header('Content-Disposition', content_disposition)
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            
+            # Stream the zip file in chunks
+            with open(temp_zip_path, 'rb') as f:
+                while True:
+                    chunk = f.read(1048576)  # 1MB chunks for speed
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+            
+            print(f"✅ Folder download complete: {foldername}")
+            
+        except BrokenPipeError:
+            print(f"⚠️ Download cancelled: {foldername}")
+        except Exception as e:
+            print(f"❌ Folder download error: {e}")
+        finally:
+            # Clean up temp file
+            if temp_zip_path and os.path.exists(temp_zip_path):
+                try:
+                    os.remove(temp_zip_path)
+                except:
+                    pass
     
     def do_OPTIONS(self):
         """Handle CORS preflight."""
@@ -598,6 +787,74 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
             background: #22c55e;
         }
 
+        /* Folder Upload Styles */
+        .folder-btn::after {
+            content: none;
+        }
+
+        .folder-info {
+            width: 100%;
+            background: #f5f5f5;
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin: 12px 0;
+        }
+
+        .folder-name {
+            font-weight: 600;
+            font-size: 14px;
+            color: #222;
+            word-break: break-all;
+        }
+
+        .folder-stats {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .folder-files {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .folder-hint {
+            padding-top: 16px;
+            font-size: 11px;
+            color: #999;
+            text-align: center;
+            line-height: 1.6;
+        }
+
+        .folder-tree-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 4px;
+            font-size: 13px;
+        }
+
+        .folder-tree-item .path {
+            color: #666;
+            font-size: 11px;
+            word-break: break-all;
+        }
+
+        .folder-tree-item .name {
+            font-weight: 500;
+            color: #222;
+        }
+
+        .folder-tree-item .size {
+            color: #888;
+            font-size: 11px;
+            margin-left: auto;
+            white-space: nowrap;
+        }
+
         /* Mac files list */
         .mac-files {
             background: white;
@@ -653,6 +910,14 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
         .file-download {
             font-size: 18px;
             color: #888;
+        }
+
+        .folder-item {
+            background: linear-gradient(to right, #fafafa, white);
+        }
+
+        .folder-item .file-download {
+            font-size: 16px;
         }
 
         .empty-state {
@@ -1075,6 +1340,7 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
         <!-- Tab Navigation (mobile only) -->
         <div class="tab-nav" id="tabNav" style="display: none;">
             <button class="tab-btn active" data-tab="files">📁 Files</button>
+            <button class="tab-btn" data-tab="folder">📂 Folder</button>
             <button class="tab-btn" data-tab="camera">📸 Camera</button>
             <button class="tab-btn" data-tab="text">📝 Text</button>
         </div>
@@ -1098,6 +1364,30 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
                 <div class="section-title" id="downloadSectionTitle">Download from PC</div>
                 <div class="mac-files" id="macFiles">
                     <div class="empty-state">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Folder Tab Content -->
+        <div class="tab-content" id="folderTab">
+            <div class="section">
+                <div class="section-title" id="folderSectionTitle">Send Folder to PC</div>
+                <div class="upload-area">
+                    <button class="upload-btn folder-btn" id="folderUploadBtn" aria-label="Choose folder">📂</button>
+                    <div class="upload-hint">Tap to choose a folder</div>
+                    
+                    <div class="folder-info" id="folderInfo" style="display: none;">
+                        <div class="folder-name" id="selectedFolderName"></div>
+                        <div class="folder-stats" id="folderStats"></div>
+                    </div>
+                    
+                    <div class="pending-files folder-files" id="pendingFolderFiles"></div>
+                    <button class="send-all-btn" id="sendFolderBtn" style="display: none;">Send Folder</button>
+                </div>
+                
+                <div class="folder-hint">
+                    Select a folder to transfer all files and subfolders<br>
+                    Folder structure will be preserved on the PC
                 </div>
             </div>
         </div>
@@ -1163,6 +1453,7 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
         </div>
 
         <input type="file" id="fileInput" multiple>
+        <input type="file" id="folderInput" webkitdirectory directory multiple>
 
         <div id="status"></div>
 
@@ -1346,6 +1637,142 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
             sendBtn.disabled = false;
         };
 
+        // ========== FOLDER UPLOAD FUNCTIONALITY ==========
+        const folderInput = document.getElementById('folderInput');
+        const folderUploadBtn = document.getElementById('folderUploadBtn');
+        const folderInfo = document.getElementById('folderInfo');
+        const selectedFolderName = document.getElementById('selectedFolderName');
+        const folderStats = document.getElementById('folderStats');
+        const pendingFolderFiles = document.getElementById('pendingFolderFiles');
+        const sendFolderBtn = document.getElementById('sendFolderBtn');
+        const folderSectionTitle = document.getElementById('folderSectionTitle');
+
+        let folderFiles = [];
+        let folderName = '';
+
+        folderUploadBtn.onclick = () => folderInput.click();
+
+        folderInput.onchange = (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+
+            // Get folder name from first file's path
+            const firstPath = files[0].webkitRelativePath;
+            folderName = firstPath.split('/')[0];
+            
+            folderFiles = files;
+            
+            // Calculate total size
+            const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+            
+            // Count unique subdirectories
+            const subdirs = new Set();
+            files.forEach(f => {
+                const parts = f.webkitRelativePath.split('/');
+                if (parts.length > 2) {
+                    subdirs.add(parts.slice(0, -1).join('/'));
+                }
+            });
+
+            // Update UI
+            folderInfo.style.display = 'block';
+            selectedFolderName.textContent = '📂 ' + folderName;
+            folderStats.textContent = `${files.length} files${subdirs.size > 0 ? `, ${subdirs.size} subfolders` : ''} • ${formatSize(totalSize)}`;
+
+            // Show file preview (first 10 files)
+            const previewFiles = files.slice(0, 10);
+            pendingFolderFiles.innerHTML = previewFiles.map(f => {
+                const relativePath = f.webkitRelativePath;
+                const fileName = f.name;
+                const pathWithoutName = relativePath.replace('/' + fileName, '').replace(folderName + '/', '');
+                return `
+                    <div class="folder-tree-item">
+                        <span>${getFileIcon(fileName)}</span>
+                        <div>
+                            <div class="name">${fileName}</div>
+                            ${pathWithoutName ? `<div class="path">${pathWithoutName}/</div>` : ''}
+                        </div>
+                        <span class="size">${formatSize(f.size)}</span>
+                    </div>
+                `;
+            }).join('');
+
+            if (files.length > 10) {
+                pendingFolderFiles.innerHTML += `
+                    <div class="folder-tree-item" style="justify-content: center; color: #666;">
+                        ... and ${files.length - 10} more files
+                    </div>
+                `;
+            }
+
+            sendFolderBtn.style.display = 'block';
+            const target = !isDesktop ? 'PC' : 'Phone';
+            sendFolderBtn.textContent = `Send "${folderName}" to ${target}`;
+            
+            folderInput.value = '';
+        };
+
+        sendFolderBtn.onclick = async () => {
+            if (folderFiles.length === 0) return;
+
+            sendFolderBtn.disabled = true;
+            sendFolderBtn.innerHTML = '<span class="spinner"></span>Sending...';
+
+            let successCount = 0;
+            let failCount = 0;
+
+            for (const file of folderFiles) {
+                try {
+                    const res = await fetch('/folder', {
+                        method: 'POST',
+                        body: file,
+                        headers: {
+                            'Content-Type': file.type || 'application/octet-stream',
+                            'X-Filename': encodeURIComponent(file.name),
+                            'X-Folder-Path': encodeURIComponent(file.webkitRelativePath)
+                        }
+                    });
+
+                    if (res.ok) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } catch (e) {
+                    failCount++;
+                }
+            }
+
+            if (successCount > 0) {
+                sendFolderBtn.classList.add('success');
+                sendFolderBtn.textContent = `✓ ${successCount} file${successCount > 1 ? 's' : ''} sent!`;
+                if (navigator.vibrate) navigator.vibrate(50);
+                
+                setTimeout(() => {
+                    folderFiles = [];
+                    folderName = '';
+                    folderInfo.style.display = 'none';
+                    pendingFolderFiles.innerHTML = '';
+                    sendFolderBtn.style.display = 'none';
+                    sendFolderBtn.classList.remove('success');
+                    loadMacFiles();
+                }, 1500);
+            }
+
+            if (failCount > 0) {
+                showStatus(`Failed to send ${failCount} file${failCount > 1 ? 's' : ''}`, 'error');
+            }
+
+            sendFolderBtn.disabled = false;
+        };
+
+        // Update folder section title based on device
+        function updateFolderUIForDevice() {
+            if (folderSectionTitle) {
+                folderSectionTitle.textContent = isDesktop ? 'Send Folder to Phone' : 'Send Folder to PC';
+            }
+        }
+
         // PC files listing
         async function loadMacFiles() {
             try {
@@ -1358,13 +1785,15 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
                 }
 
                 macFilesEl.innerHTML = files.slice(0, 50).map(file => `
-                    <div class="file-item" data-filename="${encodeURIComponent(file.name)}">
+                    <div class="file-item ${file.is_folder ? 'folder-item' : ''}" 
+                         data-filename="${encodeURIComponent(file.name)}"
+                         data-isfolder="${file.is_folder || false}">
                         <span class="file-icon">${file.icon}</span>
                         <div class="file-info">
                             <div class="file-name">${file.name}</div>
-                            <div class="file-meta">${file.size_formatted}</div>
+                            <div class="file-meta">${file.is_folder ? (file.file_count + ' files • ') : ''}${file.size_formatted}</div>
                         </div>
-                        <span class="file-download">↓</span>
+                        <span class="file-download">${file.is_folder ? '📥' : '↓'}</span>
                     </div>
                 `).join('');
 
@@ -1374,7 +1803,12 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
                         e.preventDefault();
                         e.stopPropagation();
                         const filename = decodeURIComponent(item.dataset.filename);
-                        downloadFile(filename);
+                        const isFolder = item.dataset.isfolder === 'true';
+                        if (isFolder) {
+                            downloadFolder(filename);
+                        } else {
+                            downloadFile(filename);
+                        }
                         return false;
                     };
                 });
@@ -1401,6 +1835,28 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
             
             // Reset after 2 seconds to allow new downloads
             setTimeout(() => { isDownloading = false; }, 2000);
+        }
+
+        function downloadFolder(foldername) {
+            // Prevent duplicate downloads
+            if (isDownloading) return;
+            isDownloading = true;
+            
+            showStatus('Preparing folder download...', 'info', 0);
+            
+            // Download folder as zip
+            const link = document.createElement('a');
+            link.href = `/download-folder/${encodeURIComponent(foldername)}`;
+            link.download = foldername + '.zip';
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            showStatus(`Downloading ${foldername}.zip`, 'success', 3000);
+            
+            // Reset after 3 seconds to allow new downloads
+            setTimeout(() => { isDownloading = false; }, 3000);
         }
 
         // ========== TEXT SYNC FUNCTIONALITY ==========
@@ -1756,6 +2212,7 @@ class FileTransferHandler(http.server.BaseHTTPRequestHandler):
         // ========== UPDATED INITIALIZATION ==========
         function initApp() {
             updateUIForDevice();
+            updateFolderUIForDevice();
             loadMacFiles();
             loadSyncedText();
             

@@ -7,6 +7,7 @@ Sync files and text between your Android phone and your computer.
 
 - 📱 **Phone → PC**: Pick files from Android → instantly appear in your PC Downloads
 - 💻 **PC → Phone**: Tap any PC file → downloads to your Android
+- 📂 **Folder Transfer**: Send entire folders with all subfolders preserved
 - 📝 **Text Sync**: Share text/code snippets between devices instantly
 - 📸 **Camera → Clipboard**: Snap a photo on your phone → Ctrl+V/Cmd+V on your PC!
 - 🔒 **Private**: Everything stays on your local network
@@ -78,6 +79,12 @@ You'll see a URL like:
 3. Optionally rotate or crop the image
 4. Tap "Send to Clipboard"
 5. On your PC, paste (Ctrl+V / Cmd+V) anywhere – the image is ready!
+
+**📂 Folder Transfer:**
+1. Switch to the "Folder" tab on your phone
+2. Tap to select a folder
+3. Preview the files and folder structure
+4. Tap "Send" – the entire folder with all subfolders appears in your PC's Downloads!
 
 ### 5. Stop / Uninstall
 
